@@ -1,13 +1,16 @@
 # Next.js App Router — SEO & Data Fetching Guide
 
-A practical guide for building SEO-friendly pages with the Next.js App Router, covering metadata, server/client components, and data fetching patterns used in this project.
+A practical guide for building SEO-friendly pages with the Next.js App Router, covering metadata, server/client components, data fetching patterns, and auth-aware server requests used in this project.
 
 ---
 
 ## Table of Contents
 
 - [Project Structure](#project-structure)
-- [Axios Instance](#axios-instance)
+- [Axios Setup](#axios-setup)
+  - [Client Axios Instance](#client-axios-instance)
+  - [Server Axios Instance (with Auth)](#server-axios-instance-with-auth)
+- [Dynamic Rendering](#dynamic-rendering)
 - [SEO Metadata](#seo-metadata)
   - [Static Metadata (layout.tsx)](#static-metadata-layouttsx)
   - [Dynamic Metadata (generateMetadata)](#dynamic-metadata-generatemetadata)
@@ -15,12 +18,17 @@ A practical guide for building SEO-friendly pages with the Next.js App Router, c
 - [Server vs Client Components](#server-vs-client-components)
   - [When to Use Each](#when-to-use-each)
   - [The Server + Client Pattern](#the-server--client-pattern)
+  - [Why NOT to Fetch in Client Components for SEO Pages](#why-not-to-fetch-in-client-components-for-seo-pages)
 - [Data Fetching Patterns](#data-fetching-patterns)
   - [Server-Side Fetch (SEO-Critical)](#1-server-side-fetch-seo-critical)
   - [Parallel Fetching](#2-parallel-fetching)
   - [Sequential / Dependent Fetching](#3-sequential--dependent-fetching)
   - [Server + Client Hybrid](#4-server--client-hybrid)
   - [Client-Only Fetch](#5-client-only-fetch)
+- [Auth in Server Components](#auth-in-server-components)
+  - [Reading Cookies](#reading-cookies)
+  - [Forwarding the Cookie Header](#forwarding-the-cookie-header)
+  - [With Keycloak / next-auth](#with-keycloak--next-auth)
 - [Decision Guide](#decision-guide)
 
 ---
@@ -30,24 +38,27 @@ A practical guide for building SEO-friendly pages with the Next.js App Router, c
 ```
 src/
 ├── app/
-│   ├── layout.tsx              # Root layout — static metadata
-│   ├── page.tsx                # Home — server component, product listing
-│   ├── globals.css             # Tailwind CSS
+│   ├── layout.tsx                  # Root layout — static SEO metadata
+│   ├── page.tsx                    # Home — server component, product listing
+│   ├── globals.css                 # Tailwind CSS
 │   └── products/
 │       └── [id]/
-│           ├── page.tsx        # Server component — generateMetadata + data fetch
+│           ├── page.tsx            # Server component — generateMetadata + data fetch
 │           └── product-detail.tsx  # Client component — useEffect, interactivity
 ├── lib/
-│   └── axios.ts                # Axios instance with base URL & interceptors
+│   ├── axios.ts                    # Base axios instance (client & shared)
+│   └── axios-server.ts            # Server-only axios with auth cookie forwarding
 └── types/
-    └── product.ts              # Shared Product interface
+    └── product.ts                  # Shared Product interface
 ```
 
 ---
 
-## Axios Instance
+## Axios Setup
 
-Located at `src/lib/axios.ts`. Configured with environment variables for the base URL.
+### Client Axios Instance
+
+Located at `src/lib/axios.ts`. Base instance used for client-side requests and as the foundation for the server instance.
 
 ```ts
 import axios from 'axios';
@@ -69,11 +80,58 @@ Set the base URL in `.env`:
 NEXT_PUBLIC_API_BASE_URL=https://fakestoreapi.com
 ```
 
-Import anywhere:
+### Server Axios Instance (with Auth)
+
+Located at `src/lib/axios-server.ts`. Reads auth cookies from the incoming request using `next/headers` and attaches them to outgoing API calls.
 
 ```ts
-import axiosInstance from '@/lib/axios';
+import { cookies } from "next/headers";
+import axiosInstance from "./axios";
+
+export async function getServerAxios() {
+  const cookieStore = await cookies();
+  const token = cookieStore.get("auth_token")?.value;
+
+  const instance = axiosInstance;
+  if (token) {
+    instance.defaults.headers.common["Authorization"] = `Bearer ${token}`;
+  }
+  return instance;
+}
 ```
+
+**Use in server components:**
+
+```ts
+import { getServerAxios } from "@/lib/axios-server";
+
+async function getProduct(id: string) {
+  const axios = await getServerAxios();
+  const { data } = await axios.get<Product>(`/products/${id}`);
+  return data;
+}
+```
+
+**Why two instances?**
+
+| Instance | Used in | Auth | Access to cookies |
+|---|---|---|---|
+| `axios.ts` | Client components (`useEffect`) | Browser sends cookies automatically | N/A |
+| `axios-server.ts` | Server components (`page.tsx`) | Manually reads from `next/headers` | Yes |
+
+---
+
+## Dynamic Rendering
+
+Pages that fetch from external APIs at request time should use `force-dynamic` to prevent prerendering failures during build:
+
+```ts
+export const dynamic = "force-dynamic";
+```
+
+**Why?** During `next build` (or `vercel --prod`), Next.js tries to prerender pages. If the external API blocks cloud IPs or is unavailable during build, the build fails. `force-dynamic` skips prerendering and renders on every request instead.
+
+**For ecommerce this is ideal** — products are always fresh, and pages are still fully server-rendered (SSR) for SEO.
 
 ---
 
@@ -81,7 +139,7 @@ import axiosInstance from '@/lib/axios';
 
 ### Static Metadata (layout.tsx)
 
-For pages where metadata doesn't depend on dynamic data, export a `metadata` object from `layout.tsx` or `page.tsx`:
+For pages where metadata doesn't depend on dynamic data, export a `metadata` object:
 
 ```ts
 // src/app/layout.tsx
@@ -163,6 +221,7 @@ When a child page sets `title: "Wireless Headphones"`, the rendered title become
 | `useEffect` / `useState` | No | Yes |
 | Event handlers (onClick, etc.) | No | Yes |
 | Browser APIs (localStorage, etc.) | No | Yes |
+| Access to `cookies()` / `headers()` | Yes | No |
 | SEO-friendly (HTML in initial response) | Yes | Depends* |
 
 *Client components are server-rendered on first load (SSR), but data fetched in `useEffect` is NOT in the initial HTML.
@@ -173,21 +232,23 @@ This is the core architecture used in this project:
 
 ```
 page.tsx (Server Component)
-├── generateMetadata()    → dynamic SEO tags
-├── fetch data            → server-side, in initial HTML
-└── <ClientComponent />   → receives data as props
-    ├── useEffect()       → analytics, side effects
-    ├── useState()        → interactive UI state
-    └── onClick handlers  → user interactions
+├── generateMetadata()       → dynamic SEO tags (title, OG, Twitter)
+├── getServerAxios()         → reads auth cookie, creates authed axios
+├── fetch data               → server-side, included in initial HTML
+└── <ProductDetail />        → receives data as props
+    ├── product content      → server-rendered, SEO-friendly ✅
+    ├── useEffect()          → analytics, side effects (client-only)
+    ├── useState()           → interactive UI state
+    └── onClick handlers     → user interactions
 ```
 
-**Example:**
+**Example from this project:**
 
 ```ts
 // page.tsx — Server Component
 export default async function ProductPage({ params }: Props) {
   const { id } = await params;
-  const product = await getProduct(id);       // fetched on server
+  const product = await getProduct(id);       // fetched on server with auth
   return <ProductDetail product={product} />;  // passed as prop
 }
 ```
@@ -201,13 +262,29 @@ export default function ProductDetail({ product }: { product: Product }) {
     console.log(`Viewed product: ${product.title}`);
   }, [product.id]);
 
-  return ( /* render product UI */ );
+  return ( /* render product UI — all content is in initial HTML */ );
 }
 ```
 
 **Why this works:**
 - `product` data is fetched on the server → included in SSR HTML → search engines see it
+- Auth token is read from cookies via `getServerAxios()` → API calls are authenticated
 - `useEffect` runs only in the browser → used for non-SEO things (analytics, etc.)
+
+### Why NOT to Fetch in Client Components for SEO Pages
+
+```
+❌ Bad for SEO                          ✅ Good for SEO
+page.tsx passes only productId          page.tsx fetches product, passes as prop
+  ↓                                       ↓
+product-detail.tsx                      product-detail.tsx
+  useEffect → fetch product               receives product prop
+  initial HTML = "Loading..."             initial HTML = full product content
+  Google sees nothing                     Google sees everything
+  API called twice (metadata + client)    API called once on server
+```
+
+**Rule of thumb:** If content should be indexed by search engines, fetch it in the server component and pass it as props. Use `useEffect` only for non-SEO side effects.
 
 ---
 
@@ -215,12 +292,13 @@ export default function ProductDetail({ product }: { product: Product }) {
 
 ### 1. Server-Side Fetch (SEO-Critical)
 
-The simplest pattern. Fetch directly in the server component.
+The simplest pattern. Fetch directly in the server component using the server axios instance.
 
 ```ts
 // page.tsx
 export default async function Home() {
-  const { data: products } = await axiosInstance.get<Product[]>("/products");
+  const axios = await getServerAxios();
+  const { data: products } = await axios.get<Product[]>("/products");
 
   return (
     <div>
@@ -239,11 +317,12 @@ When multiple independent API calls are needed, use `Promise.all` to run them co
 ```ts
 export default async function ProductPage({ params }: Props) {
   const { id } = await params;
+  const axios = await getServerAxios();
 
   const [product, reviews, recommendations] = await Promise.all([
-    axiosInstance.get<Product>(`/products/${id}`),
-    axiosInstance.get(`/products/${id}/reviews`),
-    axiosInstance.get<Product[]>(`/products?limit=4`),
+    axios.get<Product>(`/products/${id}`),
+    axios.get(`/products/${id}/reviews`),
+    axios.get<Product[]>(`/products?limit=4`),
   ]);
 
   return (
@@ -265,11 +344,12 @@ When the second call depends on the first call's result:
 ```ts
 export default async function ProductPage({ params }: Props) {
   const { id } = await params;
+  const axios = await getServerAxios();
 
-  const { data: product } = await axiosInstance.get<Product>(`/products/${id}`);
+  const { data: product } = await axios.get<Product>(`/products/${id}`);
 
   // needs product.category from the first call
-  const { data: similar } = await axiosInstance.get<Product[]>(
+  const { data: similar } = await axios.get<Product[]>(
     `/products/category/${product.category}`
   );
 
@@ -287,7 +367,8 @@ Fetch critical data on the server, non-critical data on the client:
 // page.tsx — critical data on server
 export default async function ProductPage({ params }: Props) {
   const { id } = await params;
-  const { data: product } = await axiosInstance.get<Product>(`/products/${id}`);
+  const axios = await getServerAxios();
+  const { data: product } = await axios.get<Product>(`/products/${id}`);
 
   return <ProductDetail product={product} />;
 }
@@ -346,16 +427,73 @@ export default function ProductDetail({ id }: { id: string }) {
 
 ---
 
+## Auth in Server Components
+
+Server components run on Node.js — there's no `document.cookie`. You must explicitly read cookies from the incoming request.
+
+### Reading Cookies
+
+Use `cookies()` from `next/headers` (this is what `axios-server.ts` does):
+
+```ts
+import { cookies } from "next/headers";
+
+const cookieStore = await cookies();
+const token = cookieStore.get("auth_token")?.value;
+```
+
+### Forwarding the Cookie Header
+
+For session-based auth where the API expects the raw cookie string:
+
+```ts
+import { headers } from "next/headers";
+
+const headersList = await headers();
+const cookie = headersList.get("cookie") ?? "";
+
+await axiosInstance.get("/api/data", {
+  headers: { Cookie: cookie },
+});
+```
+
+### With Keycloak / next-auth
+
+When using Keycloak via next-auth, replace cookie reading with `auth()`:
+
+```ts
+import { auth } from "@/lib/auth";
+
+async function getProduct(id: string) {
+  const session = await auth();
+
+  const { data } = await axiosInstance.get<Product>(`/products/${id}`, {
+    headers: {
+      Authorization: `Bearer ${session?.accessToken}`,
+    },
+  });
+  return data;
+}
+```
+
+| Context | How to get auth token |
+|---|---|
+| **Server Component** (`page.tsx`) | `cookies()` or `headers()` from `next/headers`, or `auth()` from next-auth |
+| **Client Component** (`"use client"`) | Browser sends cookies automatically, or use axios interceptor with `document.cookie` |
+| **Middleware** | `request.cookies.get("auth_token")` |
+
+---
+
 ## Decision Guide
 
 ```
 Is the data needed for SEO?
-├── YES → Fetch in Server Component (page.tsx)
+├── YES → Fetch in Server Component (page.tsx) using getServerAxios()
 │   ├── Multiple independent calls? → Promise.all (parallel)
 │   ├── Call B depends on Call A?   → Sequential (await A, then await B)
 │   └── Also need useEffect?       → Server fetch + pass to Client Component as props
 │
-└── NO → Fetch in Client Component (useEffect)
+└── NO → Fetch in Client Component (useEffect) using axiosInstance
     └── Dashboard, admin, user-specific content
 ```
 
@@ -363,10 +501,10 @@ Is the data needed for SEO?
 
 | Pattern | SEO | Speed | Complexity | Use Case |
 |---|---|---|---|---|
-| Server fetch | Full | Fast | Low | Product pages, listings |
+| Server fetch (`getServerAxios`) | Full | Fast | Low | Product pages, listings |
 | Parallel server | Full | Fastest | Low | Multiple independent APIs |
 | Sequential server | Full | Slower | Low | Dependent API calls |
 | Server + Client hybrid | Partial | Fast | Medium | Critical + non-critical data |
-| Client-only | None | Slowest* | Low | Dashboards, admin panels |
+| Client-only (`axiosInstance`) | None | Slowest* | Low | Dashboards, admin panels |
 
 *Slowest for first meaningful paint since data loads after JavaScript hydration.

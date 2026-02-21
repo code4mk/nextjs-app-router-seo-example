@@ -6,7 +6,6 @@ import type { Product } from "@/types/product";
 
 export default function ProductDetail({ product }: { product: Product }) {
   useEffect(() => {
-    // example: track product view, analytics, etc.
     console.log(`Viewed product: ${product.title}`);
   }, [product.id]);
 

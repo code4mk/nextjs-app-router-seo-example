@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import axiosInstance from "@/lib/axios";
+import { getServerAxios } from "@/lib/axios-server";
 import type { Product } from "@/types/product";
 import ProductDetail from "./product-detail";
 
@@ -10,7 +10,8 @@ interface Props {
 }
 
 async function getProduct(id: string): Promise<Product> {
-  const { data } = await axiosInstance.get<Product>(`/products/${id}`);
+  const axios = await getServerAxios();
+  const { data } = await axios.get<Product>(`/products/${id}`);
   return data;
 }
 
