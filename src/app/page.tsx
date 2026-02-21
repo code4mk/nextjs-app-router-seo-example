@@ -2,6 +2,8 @@ import Link from "next/link";
 import axiosInstance from "@/lib/axios";
 import type { Product } from "@/types/product";
 
+export const dynamic = "force-dynamic";
+
 async function getProducts(): Promise<Product[]> {
   const { data } = await axiosInstance.get<Product[]>("/products");
   return data;

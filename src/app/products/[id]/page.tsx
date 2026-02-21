@@ -3,6 +3,8 @@ import axiosInstance from "@/lib/axios";
 import type { Product } from "@/types/product";
 import ProductDetail from "./product-detail";
 
+export const dynamic = "force-dynamic";
+
 interface Props {
   params: Promise<{ id: string }>;
 }
