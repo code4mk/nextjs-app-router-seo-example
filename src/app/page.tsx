@@ -1,65 +1,88 @@
-import Image from "next/image";
+import Link from "next/link";
+import axiosInstance from "@/lib/axios";
+import type { Product } from "@/types/product";
 
-export default function Home() {
+async function getProducts(): Promise<Product[]> {
+  const { data } = await axiosInstance.get<Product[]>("/products");
+  return data;
+}
+
+export default async function Home() {
+  const products = await getProducts();
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
+      <header className="sticky top-0 z-10 border-b border-zinc-200 bg-white/80 backdrop-blur-md dark:border-zinc-800 dark:bg-zinc-950/80">
+        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
+          <Link href="/" className="text-xl font-bold tracking-tight text-zinc-900 dark:text-zinc-50">
+            Kamal Shop
+          </Link>
+          <nav className="flex items-center gap-6 text-sm font-medium text-zinc-600 dark:text-zinc-400">
+            <a href="#" className="transition-colors hover:text-zinc-900 dark:hover:text-zinc-50">
+              All Products
+            </a>
+            <a href="#" className="transition-colors hover:text-zinc-900 dark:hover:text-zinc-50">
+              Categories
+            </a>
+          </nav>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+      </header>
+
+      <main className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
+        <section className="mb-10">
+          <h2 className="text-3xl font-bold tracking-tight text-zinc-900 dark:text-zinc-50">
+            Featured Products
+          </h2>
+          <p className="mt-2 text-zinc-600 dark:text-zinc-400">
+            Discover our handpicked selection of quality products at the best prices.
+          </p>
+        </section>
+
+        <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          {products.map((product) => (
+            <Link key={product.id} href={`/products/${product.id}`}>
+              <article className="group flex h-full flex-col overflow-hidden rounded-xl border border-zinc-200 bg-white transition-shadow hover:shadow-lg dark:border-zinc-800 dark:bg-zinc-900">
+                <div className="flex h-56 items-center justify-center bg-white p-6">
+                  <img
+                    src={product.image}
+                    alt={product.title}
+                    className="h-full max-h-40 w-auto object-contain transition-transform group-hover:scale-105"
+                  />
+                </div>
+
+                <div className="flex flex-1 flex-col gap-2 p-4">
+                  <span className="w-fit rounded-full bg-zinc-100 px-2.5 py-0.5 text-xs font-medium capitalize text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">
+                    {product.category}
+                  </span>
+                  <h3 className="line-clamp-2 text-sm font-semibold text-zinc-900 dark:text-zinc-50">
+                    {product.title}
+                  </h3>
+                  <p className="line-clamp-2 text-xs text-zinc-500 dark:text-zinc-400">
+                    {product.description}
+                  </p>
+
+                  <div className="mt-auto flex items-center justify-between pt-3">
+                    <span className="text-lg font-bold text-zinc-900 dark:text-zinc-50">
+                      ${product.price.toFixed(2)}
+                    </span>
+                    <div className="flex items-center gap-1 text-sm text-zinc-500 dark:text-zinc-400">
+                      <span className="text-amber-500">&#9733;</span>
+                      <span>{product.rating.rate}</span>
+                      <span className="text-xs">({product.rating.count})</span>
+                    </div>
+                  </div>
+                </div>
+              </article>
+            </Link>
+          ))}
         </div>
       </main>
+
+      <footer className="border-t border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
+        <div className="mx-auto max-w-7xl px-4 py-8 text-center text-sm text-zinc-500 dark:text-zinc-400 sm:px-6 lg:px-8">
+          &copy; {new Date().getFullYear()} Kamal Shop. All rights reserved.
+        </div>
+      </footer>
     </div>
   );
 }
