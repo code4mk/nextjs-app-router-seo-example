@@ -4,8 +4,8 @@ import axiosInstance from "./axios";
 
 export async function getServerAxios() {
   const cookieStore = await cookies();
-  const token = cookieStore.get("auth_token")?.value;
-
+  const token = cookieStore.get("refresh_token")?.value;
+  console.log("token", token);
   const instance = axiosInstance;
   if (token) {
     instance.defaults.headers.common["Authorization"] = `Bearer ${token}`;

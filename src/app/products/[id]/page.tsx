@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import { getServerAxios } from "@/lib/axios-server";
 import type { Product } from "@/types/product";
 import ProductDetail from "./product-detail";
+import { cache } from "react";
+
 
 export const dynamic = "force-dynamic";
 
@@ -9,11 +11,12 @@ interface Props {
   params: Promise<{ id: string }>;
 }
 
-async function getProduct(id: string): Promise<Product> {
+// using cache to avoid re-fetching the product on every request
+const getProduct = cache(async (id: string): Promise<Product> => {
   const axios = await getServerAxios();
   const { data } = await axios.get<Product>(`/products/${id}`);
   return data;
-}
+});
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { id } = await params;
